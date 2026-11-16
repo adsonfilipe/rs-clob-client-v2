@@ -1494,7 +1494,18 @@ impl Client<Unauthenticated> {
         headers.insert("Connection", HeaderValue::from_static("keep-alive"));
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
-        let client = ReqwestClient::builder().default_headers(headers).build()?;
+        // rust-maker MAKER_FINDINGS §159 (vendored patch): without these, a connection that
+        // dies silently (no FIN, no RST) keeps every request on it hanging until TCP gives up
+        // (~15 min), and the bot multiplexes all its orders on one HTTP/2 connection. The
+        // keep-alive PINGs find a dead connection in ~8 s and reqwest then dials a new one.
+        let client = ReqwestClient::builder()
+            .default_headers(headers)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(5))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(3))
+            .http2_keep_alive_while_idle(true)
+            .tcp_nodelay(true)
+            .build()?;
 
         let geoblock_host = Url::parse(
             config
